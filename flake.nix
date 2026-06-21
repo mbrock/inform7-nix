@@ -327,6 +327,117 @@
           esac
           EOF
           chmod +x $out/bin/i7-play
+
+          cat > $out/bin/i7-release-web <<EOF
+          #!${pkgs.runtimeShell}
+          set -e
+
+          format=glulx
+          force=0
+          while [ "\$#" -gt 0 ]; do
+            case "\$1" in
+              --glulx)
+                format=glulx
+                shift
+                ;;
+              --zcode)
+                format=zcode
+                shift
+                ;;
+              --force)
+                force=1
+                shift
+                ;;
+              --)
+                shift
+                break
+                ;;
+              -*)
+                echo "usage: i7-release-web [--glulx|--zcode] [--force] SOURCE.ni WEBROOT" >&2
+                exit 64
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done
+          if [ "\$#" -ne 2 ]; then
+            echo "usage: i7-release-web [--glulx|--zcode] [--force] SOURCE.ni WEBROOT" >&2
+            exit 64
+          fi
+
+          source="\$1"
+          webroot="\$2"
+          if [ ! -f "\$source" ]; then
+            echo "i7-release-web: source file not found: \$source" >&2
+            exit 66
+          fi
+          if [ -e "\$webroot" ] && [ "\$force" -ne 1 ] && [ -n "\$(find "\$webroot" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            echo "i7-release-web: output directory is not empty: \$webroot" >&2
+            echo "Use --force to replace it." >&2
+            exit 73
+          fi
+
+          work="\$(mktemp -d)"
+          trap 'rm -rf "\$work"' EXIT
+          project="\$work/Story.inform"
+          materials="\$work/Story.materials"
+          mkdir -p "\$project/Source" "\$project/Build" "\$materials"
+
+          hash="\$(${pkgs.coreutils}/bin/sha256sum "\$source" | ${pkgs.coreutils}/bin/cut -c1-32)"
+          uuid="\$(printf '%s-%s-%s-%s-%s\n' \
+            "\$(${pkgs.coreutils}/bin/printf '%s' "\$hash" | ${pkgs.coreutils}/bin/cut -c1-8)" \
+            "\$(${pkgs.coreutils}/bin/printf '%s' "\$hash" | ${pkgs.coreutils}/bin/cut -c9-12)" \
+            "\$(${pkgs.coreutils}/bin/printf '%s' "\$hash" | ${pkgs.coreutils}/bin/cut -c13-16)" \
+            "\$(${pkgs.coreutils}/bin/printf '%s' "\$hash" | ${pkgs.coreutils}/bin/cut -c17-20)" \
+            "\$(${pkgs.coreutils}/bin/printf '%s' "\$hash" | ${pkgs.coreutils}/bin/cut -c21-32)")"
+          printf '%s\n' "\$uuid" > "\$project/uuid.txt"
+
+          ${pkgs.coreutils}/bin/cp "\$source" "\$project/Source/story.ni"
+          if ! ${pkgs.gnugrep}/bin/grep -qi '^[[:space:]]*Release along with .*interpreter' "\$project/Source/story.ni"; then
+            {
+              printf '\n'
+              printf 'Release along with a website and an interpreter.\n'
+            } >> "\$project/Source/story.ni"
+          fi
+
+          case "\$format" in
+            glulx)
+              i7_format=Inform6/32
+              i6_switches=-wG
+              story_file="\$project/Build/output.ulx"
+              blorb_file="\$project/Build/output.gblorb"
+              ;;
+            zcode)
+              i7_format=Inform6/16
+              i6_switches=-wv8
+              story_file="\$project/Build/output.z8"
+              blorb_file="\$project/Build/output.zblorb"
+              ;;
+          esac
+
+          "$out/bin/inform7" -release -project "\$project" -format="\$i7_format" -no-progress -no-index -no-problems
+          ${pkgs.inform6}/bin/inform "\$i6_switches" '\$MAX_STATIC_DATA=500000' '\$MAX_ZCODE_SIZE=524288' "\$project/Build/auto.inf" "\$story_file"
+          inblorb_log="\$work/inblorb.log"
+          "$out/bin/inblorb" "\$project/Release.blurb" "\$blorb_file" | ${pkgs.coreutils}/bin/tee "\$inblorb_log"
+
+          blorb_dest="\$(${pkgs.gnused}/bin/sed -n 's/^Copy blorb to: \\[\\[\\(.*\\)\\]\\]$/\\1/p' "\$inblorb_log" | ${pkgs.coreutils}/bin/tail -n 1)"
+          if [ -n "\$blorb_dest" ]; then
+            mkdir -p "\$(${pkgs.coreutils}/bin/dirname "\$blorb_dest")"
+            ${pkgs.coreutils}/bin/cp "\$blorb_file" "\$blorb_dest"
+          fi
+          if [ ! -f "\$materials/Release/Cover.jpg" ] && [ -f "\$materials/Release/DefaultCover.jpg" ]; then
+            ${pkgs.coreutils}/bin/cp "\$materials/Release/DefaultCover.jpg" "\$materials/Release/Cover.jpg"
+          fi
+
+          if [ "\$force" -eq 1 ]; then
+            rm -rf "\$webroot"
+          fi
+          mkdir -p "\$webroot"
+          ${pkgs.coreutils}/bin/cp -R "\$materials/Release/." "\$webroot/"
+          echo "Wrote web release to \$webroot"
+          EOF
+          chmod +x $out/bin/i7-release-web
         '';
 
       in {
@@ -352,6 +463,10 @@
           i7-play = {
             type = "app";
             program = "${inform}/bin/i7-play";
+          };
+          i7-release-web = {
+            type = "app";
+            program = "${inform}/bin/i7-release-web";
           };
           glulxe = {
             type = "app";
