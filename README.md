@@ -14,8 +14,10 @@ The default package includes a few small command-line helpers:
 
 ```bash
 nix run .#i7-check -- story.ni        # translate/check an Inform 7 source file
-nix run .#i7-build -- story.ni        # build story.z8
-nix run .#i7-play -- story.z8         # play it in the terminal with Frotz
+nix run .#i7-build -- story.ni        # build story.z8 for the Z-machine
+nix run .#i7-build -- --glulx story.ni # build story.ulx for Glulx
+nix run .#i7-play -- story.z8         # play Z-code with Frotz
+nix run .#i7-play -- story.ulx        # play Glulx with Glulxe/CheapGlk
 ```
 
 Or enter the shell and run them directly:
@@ -24,7 +26,9 @@ Or enter the shell and run them directly:
 nix develop
 i7-check story.ni
 i7-build story.ni
+i7-build --glulx story.ni
 i7-play story.z8
+i7-play story.ulx
 ```
 
 `inform7` itself is also wrapped to work from the command line. It copies

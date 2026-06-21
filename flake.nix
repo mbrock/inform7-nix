@@ -19,6 +19,13 @@
         # we use clangStdenv because Graham Nelson recommends clang
         # and has hardcoded it in a bunch of different meta build scripts
 
+        informSrc = pkgs.fetchFromGitHub {
+          owner = "ganelson";
+          repo = "inform";
+          rev = "2c77a75572f94064b2ad946e69f22c542cdf1992";
+          sha256 = "sha256-zacN4t/pH743Y0AomnGx432Whk1wv/3TTVGB3osKGQI=";
+        };
+
         inweb = pkgs.clangStdenv.mkDerivation {
           pname = "inweb";
           version = "9.0-beta";
@@ -130,12 +137,7 @@
         informUnwrapped = pkgs.clangStdenv.mkDerivation {
           pname = "inform7";
           version = "10.2.0";
-          src = pkgs.fetchFromGitHub {
-            owner = "ganelson";
-            repo = "inform";
-            rev = "2c77a75572f94064b2ad946e69f22c542cdf1992";
-            sha256 = "sha256-zacN4t/pH743Y0AomnGx432Whk1wv/3TTVGB3osKGQI=";
-          };
+          src = informSrc;
 
           nativeBuildInputs = [ pkgs.makeWrapper inweb intest ];
 
@@ -180,6 +182,45 @@
             description = "Inform 7 compiler for interactive fiction";
             homepage = "https://ganelson.github.io/inform/";
             license = licenses.artistic2;
+            maintainers = [ ];
+            platforms = platforms.unix;
+          };
+        };
+
+        glulxe = pkgs.stdenv.mkDerivation {
+          pname = "glulxe-cheapglk";
+          version = "0.6.1";
+          src = informSrc;
+
+          buildPhase = ''
+            runHook preBuild
+
+            cd inform6/Tests/Assistants/dumb-glulx/cheapglk
+            make CC="$CC" OPTIONS="$CFLAGS"
+
+            cd ../glulxe
+            make CC="$CC" \
+              GLKINCLUDEDIR=../cheapglk \
+              GLKLIBDIR=../cheapglk \
+              GLKMAKEFILE=Make.cheapglk \
+              OPTIONS="$CFLAGS -Wno-unused -DOS_UNIX -DUNIX_RAND_GETRANDOM"
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/bin
+            cp glulxe $out/bin/
+
+            runHook postInstall
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Glulx VM interpreter linked with CheapGlk";
+            homepage = "https://eblong.com/zarf/glulx/";
+            license = licenses.mit;
             maintainers = [ ];
             platforms = platforms.unix;
           };
@@ -237,16 +278,34 @@
           cat > $out/bin/i7-build <<EOF
           #!${pkgs.runtimeShell}
           set -e
+          format=zcode
+          if [ "\''${1:-}" = "--glulx" ]; then
+            format=glulx
+            shift
+          elif [ "\''${1:-}" = "--zcode" ]; then
+            shift
+          fi
           if [ "\$#" -lt 1 ] || [ "\$#" -gt 2 ]; then
-            echo "usage: i7-build SOURCE.ni [OUTPUT.z8]" >&2
+            echo "usage: i7-build [--zcode|--glulx] SOURCE.ni [OUTPUT]" >&2
             exit 64
           fi
           source="\$1"
-          output="\''${2:-\''${source%.*}.z8}"
+          case "\$format" in
+            zcode)
+              i7_format=Inform6/16
+              i6_switches=-wv8
+              output="\''${2:-\''${source%.*}.z8}"
+              ;;
+            glulx)
+              i7_format=Inform6/32
+              i6_switches=-wG
+              output="\''${2:-\''${source%.*}.ulx}"
+              ;;
+          esac
           tmp="\$(mktemp -d)"
           trap 'rm -rf "\$tmp"' EXIT
-          "$out/bin/inform7" -source "\$source" -format=Inform6/16 -o "\$tmp/story.i6" -no-progress -no-index -no-problems
-          ${pkgs.inform6}/bin/inform -wv8 '\$MAX_STATIC_DATA=500000' '\$MAX_ZCODE_SIZE=524288' "\$tmp/story.i6" "\$output"
+          "$out/bin/inform7" -source "\$source" -format="\$i7_format" -o "\$tmp/story.i6" -no-progress -no-index -no-problems
+          ${pkgs.inform6}/bin/inform "\$i6_switches" '\$MAX_STATIC_DATA=500000' '\$MAX_ZCODE_SIZE=524288' "\$tmp/story.i6" "\$output"
           echo "Wrote \$output"
           EOF
           chmod +x $out/bin/i7-build
@@ -255,17 +314,24 @@
           #!${pkgs.runtimeShell}
           set -e
           if [ "\$#" -ne 1 ]; then
-            echo "usage: i7-play STORY.z8" >&2
+            echo "usage: i7-play STORY.z8|STORY.ulx" >&2
             exit 64
           fi
-          exec ${pkgs.frotz}/bin/frotz -p -q "\$1"
+          case "\$1" in
+            *.ulx|*.ULX)
+              exec ${glulxe}/bin/glulxe "\$1"
+              ;;
+            *)
+              exec ${pkgs.frotz}/bin/frotz -p -q "\$1"
+              ;;
+          esac
           EOF
           chmod +x $out/bin/i7-play
         '';
 
       in {
         packages = {
-          inherit inweb intest inform;
+          inherit inweb intest inform glulxe;
           inform-unwrapped = informUnwrapped;
           default = inform;
         };
@@ -287,10 +353,14 @@
             type = "app";
             program = "${inform}/bin/i7-play";
           };
+          glulxe = {
+            type = "app";
+            program = "${glulxe}/bin/glulxe";
+          };
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = [ inweb intest inform pkgs.inform6 pkgs.frotz ];
+          buildInputs = [ inweb intest inform glulxe pkgs.inform6 pkgs.frotz ];
         };
       }
     );
