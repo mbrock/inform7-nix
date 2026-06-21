@@ -127,7 +127,7 @@
           };
         };
 
-        inform = pkgs.clangStdenv.mkDerivation {
+        informUnwrapped = pkgs.clangStdenv.mkDerivation {
           pname = "inform7";
           version = "10.2.0";
           src = pkgs.fetchFromGitHub {
@@ -185,14 +185,112 @@
           };
         };
 
+        inform = pkgs.runCommand "inform7-10.2.0" {
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+        } ''
+          mkdir -p $out/bin $out/share
+          ln -s ${informUnwrapped}/share/inform7 $out/share/inform7
+
+          for tool in inbuild inter inblorb inpolicy; do
+            ln -s ${informUnwrapped}/bin/$tool $out/bin/$tool
+          done
+
+          cat > $out/bin/inform7 <<EOF
+          #!${pkgs.runtimeShell}
+          set -e
+
+          internal_src="${informUnwrapped}/share/inform7/Internal"
+          cache_base="\''${INFORM7_CACHE_HOME:-\''${XDG_CACHE_HOME:-\''${HOME:-/tmp}/.cache}/inform7-nix}"
+          internal_cache="\$cache_base/10.2.0/Internal"
+          marker="\$internal_cache/.nix-store-source"
+
+          if [ ! -d "\$internal_cache" ] || [ "\$(cat "\$marker" 2>/dev/null || true)" != "\$internal_src" ]; then
+            tmp="\$internal_cache.tmp.\$\$"
+            rm -rf "\$tmp"
+            mkdir -p "\$(dirname "\$internal_cache")"
+            cp -R "\$internal_src" "\$tmp"
+            chmod -R u+w "\$tmp"
+            printf '%s\n' "\$internal_src" > "\$tmp/.nix-store-source"
+            rm -rf "\$internal_cache"
+            mv "\$tmp" "\$internal_cache"
+          fi
+
+          export INFORM7_PATH="\$internal_cache"
+          export INWEB_PATH="${inweb}/share/inweb"
+          exec "${informUnwrapped}/bin/inform7" -internal "\$internal_cache" "\$@"
+          EOF
+          chmod +x $out/bin/inform7
+
+          cat > $out/bin/i7-check <<EOF
+          #!${pkgs.runtimeShell}
+          set -e
+          if [ "\$#" -ne 1 ]; then
+            echo "usage: i7-check SOURCE.ni" >&2
+            exit 64
+          fi
+          tmp="\$(mktemp -d)"
+          trap 'rm -rf "\$tmp"' EXIT
+          "$out/bin/inform7" -source "\$1" -format=Inform6/16 -o "\$tmp/story.i6" -no-progress -no-index -no-problems
+          EOF
+          chmod +x $out/bin/i7-check
+
+          cat > $out/bin/i7-build <<EOF
+          #!${pkgs.runtimeShell}
+          set -e
+          if [ "\$#" -lt 1 ] || [ "\$#" -gt 2 ]; then
+            echo "usage: i7-build SOURCE.ni [OUTPUT.z8]" >&2
+            exit 64
+          fi
+          source="\$1"
+          output="\''${2:-\''${source%.*}.z8}"
+          tmp="\$(mktemp -d)"
+          trap 'rm -rf "\$tmp"' EXIT
+          "$out/bin/inform7" -source "\$source" -format=Inform6/16 -o "\$tmp/story.i6" -no-progress -no-index -no-problems
+          ${pkgs.inform6}/bin/inform -wv8 '\$MAX_STATIC_DATA=500000' '\$MAX_ZCODE_SIZE=524288' "\$tmp/story.i6" "\$output"
+          echo "Wrote \$output"
+          EOF
+          chmod +x $out/bin/i7-build
+
+          cat > $out/bin/i7-play <<EOF
+          #!${pkgs.runtimeShell}
+          set -e
+          if [ "\$#" -ne 1 ]; then
+            echo "usage: i7-play STORY.z8" >&2
+            exit 64
+          fi
+          exec ${pkgs.frotz}/bin/frotz -p -q "\$1"
+          EOF
+          chmod +x $out/bin/i7-play
+        '';
+
       in {
         packages = {
           inherit inweb intest inform;
+          inform-unwrapped = informUnwrapped;
           default = inform;
         };
 
+        apps = {
+          inform7 = {
+            type = "app";
+            program = "${inform}/bin/inform7";
+          };
+          i7-check = {
+            type = "app";
+            program = "${inform}/bin/i7-check";
+          };
+          i7-build = {
+            type = "app";
+            program = "${inform}/bin/i7-build";
+          };
+          i7-play = {
+            type = "app";
+            program = "${inform}/bin/i7-play";
+          };
+        };
+
         devShells.default = pkgs.mkShell {
-          buildInputs = [ inweb intest inform ];
+          buildInputs = [ inweb intest inform pkgs.inform6 pkgs.frotz ];
         };
       }
     );
