@@ -226,6 +226,80 @@
           };
         };
 
+        remglk = pkgs.stdenv.mkDerivation {
+          pname = "remglk";
+          version = "0.3.2";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "erkyrath";
+            repo = "remglk";
+            rev = "remglk-0.3.2";
+            sha256 = "1b2z8ryz4k1hw33z44spvbymngyhx8g1kdhbwpg6ifnrn56aafgs";
+          };
+
+          buildPhase = ''
+            runHook preBuild
+
+            make CC="$CC" OPTIONS="$CFLAGS"
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/lib $out/include/remglk
+            cp libremglk.a $out/lib/
+            cp Make.remglk glk.h glkstart.h gi_blorb.h gi_debug.h gi_dispa.h remglk.h $out/include/remglk/
+
+            runHook postInstall
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Remote-procedure-call Glk library with JSON input and output";
+            homepage = "https://eblong.com/zarf/glk/remglk/";
+            license = licenses.mit;
+            maintainers = [ ];
+            platforms = platforms.unix;
+          };
+        };
+
+        glulxe-remglk = pkgs.stdenv.mkDerivation {
+          pname = "glulxe-remglk";
+          version = "0.6.1";
+          src = informSrc;
+
+          buildPhase = ''
+            runHook preBuild
+
+            cd inform6/Tests/Assistants/dumb-glulx/glulxe
+            make CC="$CC" \
+              GLKINCLUDEDIR=${remglk}/include/remglk \
+              GLKLIBDIR=${remglk}/lib \
+              GLKMAKEFILE=Make.remglk \
+              OPTIONS="$CFLAGS -Wno-unused -DOS_UNIX -DUNIX_RAND_GETRANDOM"
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/bin
+            cp glulxe $out/bin/glulxe-remglk
+
+            runHook postInstall
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Glulx VM interpreter linked with RemGlk JSON backend";
+            homepage = "https://eblong.com/zarf/glulx/";
+            license = licenses.mit;
+            maintainers = [ ];
+            platforms = platforms.unix;
+          };
+        };
+
         inform = pkgs.runCommand "inform7-10.2.0" {
           nativeBuildInputs = [ pkgs.makeWrapper ];
         } ''
@@ -313,8 +387,12 @@
           cat > $out/bin/i7-play <<EOF
           #!${pkgs.runtimeShell}
           set -e
+          if [ "\''${1:-}" = "--remglk" ]; then
+            shift
+            exec ${glulxe-remglk}/bin/glulxe-remglk "\$@"
+          fi
           if [ "\$#" -ne 1 ]; then
-            echo "usage: i7-play STORY.z8|STORY.ulx" >&2
+            echo "usage: i7-play [--remglk] STORY.z8|STORY.ulx" >&2
             exit 64
           fi
           case "\$1" in
@@ -327,6 +405,17 @@
           esac
           EOF
           chmod +x $out/bin/i7-play
+
+          cat > $out/bin/i7-play-remglk <<EOF
+          #!${pkgs.runtimeShell}
+          set -e
+          if [ "\$#" -lt 1 ]; then
+            echo "usage: i7-play-remglk [REMGLK/GLULXE OPTIONS] STORY.ulx|STORY.gblorb" >&2
+            exit 64
+          fi
+          exec ${glulxe-remglk}/bin/glulxe-remglk "\$@"
+          EOF
+          chmod +x $out/bin/i7-play-remglk
 
           cat > $out/bin/i7-release-web <<EOF
           #!${pkgs.runtimeShell}
@@ -442,7 +531,7 @@
 
       in {
         packages = {
-          inherit inweb intest inform glulxe;
+          inherit inweb intest inform glulxe remglk glulxe-remglk;
           inform-unwrapped = informUnwrapped;
           default = inform;
         };
@@ -464,6 +553,10 @@
             type = "app";
             program = "${inform}/bin/i7-play";
           };
+          i7-play-remglk = {
+            type = "app";
+            program = "${inform}/bin/i7-play-remglk";
+          };
           i7-release-web = {
             type = "app";
             program = "${inform}/bin/i7-release-web";
@@ -472,10 +565,14 @@
             type = "app";
             program = "${glulxe}/bin/glulxe";
           };
+          glulxe-remglk = {
+            type = "app";
+            program = "${glulxe-remglk}/bin/glulxe-remglk";
+          };
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = [ inweb intest inform glulxe pkgs.inform6 pkgs.frotz ];
+          buildInputs = [ inweb intest inform glulxe remglk glulxe-remglk pkgs.inform6 pkgs.frotz ];
         };
       }
     );

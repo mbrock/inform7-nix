@@ -18,6 +18,8 @@ nix run .#i7-build -- story.ni        # build story.z8 for the Z-machine
 nix run .#i7-build -- --glulx story.ni # build story.ulx for Glulx
 nix run .#i7-play -- story.z8         # play Z-code with Frotz
 nix run .#i7-play -- story.ulx        # play Glulx with Glulxe/CheapGlk
+nix run .#i7-play -- --remglk story.ulx # run Glulx with RemGlk JSON I/O
+nix run .#i7-play-remglk -- story.ulx # same, with RemGlk/Glulxe flags passed through
 nix run .#i7-release-web -- story.ni webroot # build a playable static site
 ```
 
@@ -30,7 +32,20 @@ i7-build story.ni
 i7-build --glulx story.ni
 i7-play story.z8
 i7-play story.ulx
+i7-play --remglk story.ulx
+i7-play-remglk story.ulx
 i7-release-web story.ni webroot
+```
+
+The default Glulx player uses Glulxe linked with CheapGlk, which is convenient
+for playing in a terminal. `i7-play-remglk` and `i7-play --remglk` use Glulxe
+linked with RemGlk instead; RemGlk speaks structured JSON over stdin/stdout and
+is intended for tools, bots, tests, or a GlkOte-style display layer rather than
+direct human play. RemGlk normally waits for an initial JSON `init` event
+describing the display metrics; for quick smoke tests, use fixed metrics:
+
+```bash
+i7-play-remglk -fm -width 80 -height 24 story.ulx
 ```
 
 `inform7` itself is also wrapped to work from the command line. It copies
